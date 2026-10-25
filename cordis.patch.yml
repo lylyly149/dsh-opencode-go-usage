@@ -1,0 +1,9 @@
+# OpenCode Go plan usage: a same-origin Host proxy for the official
+# https://opencode.ai/zen/go/v1/usage endpoint plus the browser surfaces that
+# render it. The API key is read through the credentials service; it never
+# reaches the browser.
+- insert:
+    - id: opencode-go-usage
+      name: '@lylyly149/dsh-opencode-go-usage'
+      config:
+        apiKeyEnv: OPENCODE_GO_API_KEY
