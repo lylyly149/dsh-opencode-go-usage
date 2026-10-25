@@ -4,7 +4,19 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # The client bundle runs on the shell's React 18; keep tests on the same major.
+      - dependency-name: react
+        update-types: ["version-update:semver-major"]
+      - dependency-name: react-dom
+        update-types: ["version-update:semver-major"]
+      # jsdom 30 requires Node 22.22+; CI still covers Node 20.
+      - dependency-name: jsdom
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: actions/*
+        update-types: ["version-update:semver-major"]
