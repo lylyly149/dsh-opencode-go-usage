@@ -160,9 +160,9 @@ The upstream payload is:
   is never sent in plaintext to a remote endpoint.
 - This repository contains no API keys, DSH profiles, session logs, or user
   paths. The preview image uses synthetic values.
-- The release workflow is prepared for npm Provenance and Trusted Publishing;
-  configure the npm-side publisher before using it. The current package was
-  published manually, so provenance applies to future workflow releases. See
+- The manual Release workflow uses npm Trusted Publishing (OIDC) and generates
+  provenance. Run it on the matching `v<version>` tag. Versions 1.1.1 and earlier
+  were published manually without provenance. See
   [SECURITY.md](SECURITY.md).
 
 ## Failure behavior

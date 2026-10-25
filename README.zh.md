@@ -113,7 +113,7 @@ Host 导出了 Loader `Config` schema，配置会在激活时校验，并可用�
 - 插件没有遥测、分析或第三方请求，只访问官方额度接口；Host 缓存仅在内存中。
 - 非 loopback 的上游必须是 HTTPS，避免 Bearer Key 明文传输。
 - 本仓库不包含 API Key、DSH profile、会话日志或用户路径；预览图使用示意数据。
-- 发布工作流已为 npm Provenance / Trusted Publishing 做好准备；需要先在 npm 配置发布者再使用。当前版本为手动发布，provenance 适用于后续工作流发布。见 [SECURITY.md](SECURITY.md)。
+- 手动触发的 Release 工作流通过 npm Trusted Publishing（OIDC）发布并生成 provenance；运行时请选择与包版本一致的 `v<version>` 标签。1.1.1 及以前版本为手动发布，没有 provenance。见 [SECURITY.md](SECURITY.md)。
 
 ## 失败行为
 

@@ -47,6 +47,7 @@ The test suite has three layers:
 1. Update `CHANGELOG.md` and the version in `package.json`.
 2. Run `npm test` and `npm pack --dry-run`.
 3. Commit and tag `v<version>`.
-4. Push the tag, then run the **Release** workflow from GitHub Actions. It
-   publishes to npm with provenance once npm Trusted Publishing is configured
-   for this repository.
+4. Push the tag, then run the **Release** workflow on that tag:
+   `gh workflow run release.yml --ref v<version>`. The workflow verifies the tag
+   matches `package.json`, tests and checks the package, then publishes to npm
+   with provenance through the configured Trusted Publisher.

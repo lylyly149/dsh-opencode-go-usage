@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.2 — 2026-10-25
+
+- Configure the manual GitHub Release workflow for npm Trusted Publishing and
+  provenance, with a matching version-tag check and a publication file-list gate.
+- No runtime changes.
+
 ## 1.1.1 — 2026-10-25
 
 - Clarify the provenance and Trusted Publishing status in the documentation;

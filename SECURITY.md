@@ -32,9 +32,9 @@ Security-relevant areas of this plugin:
 ## Supply chain
 
 - The npm package can be published with provenance from the GitHub Release
-  workflow (`.github/workflows/release.yml`) once npm Trusted Publishing is
-  configured for this repository.
+  workflow (`.github/workflows/release.yml`) using the npm Trusted Publisher
+  bound to this repository and workflow filename.
 - The release workflow uses OIDC (`id-token: write`) and does not require a
-  long-lived npm token. It is manual (`workflow_dispatch`) until that npm-side
-  configuration is complete.
+  long-lived npm token. It is manual (`workflow_dispatch`) and only publishes
+  from the matching `v<package-version>` tag.
 - GitHub secret scanning and push protection are enabled for this repository.
