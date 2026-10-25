@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest a UI or behavior improvement.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include API keys, tokens, profiles, session logs, or real quota
+        screenshots. Describe the problem and the desired behavior instead.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is hard or misleading today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: input
+    id: dsh-version
+    attributes:
+      label: DSH version
+      placeholder: "0.2.1-rc.3"

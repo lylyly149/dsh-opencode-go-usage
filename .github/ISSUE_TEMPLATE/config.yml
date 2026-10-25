@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/lylyly149/dsh-opencode-go-usage/security/advisories/new
+    about: Report vulnerabilities privately; do not open a public issue.
+  - name: Compatibility notes
+    url: https://github.com/lylyly149/dsh-opencode-go-usage/blob/main/COMPATIBILITY.md
+    about: Tested DSH/Node versions and known API constraints.
