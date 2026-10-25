@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.1 — 2026-10-25
+
+- Clarify the provenance and Trusted Publishing status in the documentation;
+  no runtime changes.
+
 ## 1.1.0 — 2026-10-25
 
 - Add a Loader `Config` schema for `apiKeyEnv`, `usageUrl`, and `cacheMs`, so
@@ -20,7 +25,7 @@
   becomes visible.
 - Add jsdom/react-dom component tests for fan geometry, colors, the Settings
   page, and the unavailable state (22 tests total).
-- Add `SECURITY.md`, `CONTRIBUTING.md`, Dependabot, and a provenance-enabled
+- Add `SECURITY.md`, `CONTRIBUTING.md`, Dependabot, and a provenance-ready
   npm release workflow.
 - Harden the privacy test and documentation; no real account screenshots or
   local paths are published.

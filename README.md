@@ -160,8 +160,9 @@ The upstream payload is:
   is never sent in plaintext to a remote endpoint.
 - This repository contains no API keys, DSH profiles, session logs, or user
   paths. The preview image uses synthetic values.
-- npm releases carry provenance from the GitHub release workflow; configure npm
-  Trusted Publishing for this repository to avoid long-lived npm tokens. See
+- The release workflow is prepared for npm Provenance and Trusted Publishing;
+  configure the npm-side publisher before using it. The current package was
+  published manually, so provenance applies to future workflow releases. See
   [SECURITY.md](SECURITY.md).
 
 ## Failure behavior

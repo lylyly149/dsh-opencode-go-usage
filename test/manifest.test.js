@@ -8,7 +8,7 @@ const manifest = JSON.parse(read('package.json'))
 
 test('manifest is publication-ready', () => {
   assert.equal(manifest.name, '@lylyly149/dsh-opencode-go-usage')
-  assert.equal(manifest.version, '1.1.0')
+  assert.equal(manifest.version, '1.1.1')
   assert.equal(manifest.private, undefined)
   assert.equal(manifest.license, 'MIT')
   assert.equal(manifest.publishConfig?.access, 'public')
