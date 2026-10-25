@@ -11,6 +11,9 @@ globalThis.window = {
 await import('../client.js')
 
 const React = {
+  Component: class Component {
+    constructor(props) { this.props = props }
+  },
   createElement: (type, props, ...children) => ({ type, props, children }),
   useCallback: (fn) => fn,
   useEffect: () => {},

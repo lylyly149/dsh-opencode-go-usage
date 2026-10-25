@@ -7,6 +7,8 @@
  * @module @lylyly149/dsh-opencode-go-usage
  */
 
+import z from '@deepseek-ai/schemastery'
+
 /** Stable plugin name used by diagnostics. */
 export const name = 'dsh-opencode-go-usage'
 
@@ -29,6 +31,15 @@ const MAX_CACHE_MS = 300_000
 const REQUEST_TIMEOUT_MS = 15_000
 /** Stable order and identifiers of the metered windows. */
 const WINDOW_IDS = ['rolling', 'weekly', 'monthly']
+/** Upper bound on a server-provided backoff, so a bad header cannot park us forever. */
+const MAX_RETRY_AFTER_MS = 60 * 60 * 1000
+
+/** Loader-visible configuration schema. */
+export const Config = z.object({
+  apiKeyEnv: z.string().default(DEFAULT_API_KEY_ENV),
+  usageUrl: z.string().default(DEFAULT_USAGE_URL),
+  cacheMs: z.number().step(1).min(MIN_CACHE_MS).max(MAX_CACHE_MS).default(DEFAULT_CACHE_MS),
+})
 
 function isRecord(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -51,11 +62,32 @@ function usageUrl(value) {
   if (typeof value !== 'string') return DEFAULT_USAGE_URL
   try {
     const parsed = new URL(value)
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return DEFAULT_USAGE_URL
+    const loopback = parsed.hostname === 'localhost'
+      || parsed.hostname === '127.0.0.1'
+      || parsed.hostname === '::1'
+      || parsed.hostname === '[::1]'
+    // Never send the bearer key over plaintext to a non-local host.
+    if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && loopback)) {
+      return DEFAULT_USAGE_URL
+    }
     return parsed.toString()
   } catch {
     return DEFAULT_USAGE_URL
   }
+}
+
+function retryAfterMs(response) {
+  const header = response.headers.get('retry-after')
+  if (typeof header !== 'string') return undefined
+  const seconds = Number(header)
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(MAX_RETRY_AFTER_MS, Math.round(seconds * 1000))
+  }
+  const date = Date.parse(header)
+  if (Number.isFinite(date)) {
+    return Math.min(MAX_RETRY_AFTER_MS, Math.max(0, date - Date.now()))
+  }
+  return undefined
 }
 
 function normalizeWindow(id, value) {
@@ -135,8 +167,22 @@ async function requestUsage(credentials, options) {
     })
     if (response.status === 401) return { status: 'unavailable', reason: 'invalid-key' }
     if (response.status === 403) return { status: 'unavailable', reason: 'no-subscription' }
+    if (response.status === 429) {
+      const retryAfter = retryAfterMs(response)
+      return {
+        status: 'unavailable',
+        reason: 'rate-limited',
+        ...retryAfter === undefined ? {} : { retryAfterMs: retryAfter },
+      }
+    }
     if (!response.ok) {
-      return { status: 'unavailable', reason: 'http-error', httpStatus: response.status }
+      const retryAfter = retryAfterMs(response)
+      return {
+        status: 'unavailable',
+        reason: response.status >= 500 ? 'server-error' : 'http-error',
+        httpStatus: response.status,
+        ...retryAfter === undefined ? {} : { retryAfterMs: retryAfter },
+      }
     }
     let payload
     try {
@@ -212,7 +258,7 @@ export function apply(ctx, config) {
 
   const readUsage = (force) => {
     const now = Date.now()
-    if (!force && cache !== undefined && now - cache.at < cacheMs) {
+    if (!force && cache !== undefined && now - cache.at < cache.ttl) {
       return Promise.resolve(cache.value)
     }
     if (pending !== undefined) return pending
@@ -222,11 +268,25 @@ export function apply(ctx, config) {
           || value.reason === 'missing-key'
           || value.reason === 'invalid-key'
           || value.reason === 'no-subscription'
-        if (stable) cache = { at: Date.now(), value }
+          || value.reason === 'credential-error'
+        const retryAfter = typeof value.retryAfterMs === 'number' ? value.retryAfterMs : 0
+        if (stable || retryAfter > 0) {
+          cache = {
+            at: Date.now(),
+            value,
+            ttl: retryAfter > 0 ? Math.max(cacheMs, retryAfter) : cacheMs,
+          }
+        }
         return value
       })
       .finally(() => { pending = undefined })
     return pending
+  }
+
+  if (typeof ctx.on === 'function') {
+    ctx.effect(() => ctx.on('credentials/reference-updated', (ref) => {
+      if (apiKeyEnvs.includes(ref)) cache = undefined
+    }), 'dsh-opencode-go-usage: credential cache')
   }
 
   ctx.effect(() => ctx.webServer.register({

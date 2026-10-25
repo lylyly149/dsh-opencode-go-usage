@@ -8,7 +8,7 @@ const manifest = JSON.parse(read('package.json'))
 
 test('manifest is publication-ready', () => {
   assert.equal(manifest.name, '@lylyly149/dsh-opencode-go-usage')
-  assert.equal(manifest.version, '1.0.0')
+  assert.equal(manifest.version, '1.1.0')
   assert.equal(manifest.private, undefined)
   assert.equal(manifest.license, 'MIT')
   assert.equal(manifest.publishConfig?.access, 'public')
@@ -19,8 +19,11 @@ test('manifest is publication-ready', () => {
   assert.match(manifest.repository?.url ?? '', /^git\+https:\/\/github\.com\/lylyly149\//)
   assert.ok(manifest.files.includes('LICENSE'))
   assert.ok(manifest.files.includes('README.zh.md'))
+  assert.ok(manifest.files.includes('SECURITY.md'))
+  assert.ok(manifest.files.includes('CONTRIBUTING.md'))
   assert.ok(manifest.files.includes('client.js'))
   assert.ok(manifest.files.includes('index.js'))
+  assert.equal(typeof manifest.dependencies?.['@deepseek-ai/schemastery'], 'string')
 })
 
 test('bundle patch and client module use the published package name', () => {
@@ -49,6 +52,9 @@ test('published text files contain no local paths or obvious secrets', () => {
     'cordis.patch.yml',
     'README.md',
     'README.zh.md',
+    'CHANGELOG.md',
+    'SECURITY.md',
+    'CONTRIBUTING.md',
     'LICENSE',
     'icon.svg',
     'locale/en.json',

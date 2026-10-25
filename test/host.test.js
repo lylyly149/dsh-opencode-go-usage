@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { apply } from '../index.js'
+import { apply, Config } from '../index.js'
 
 const PATH = '/plugins/dsh-opencode-go/usage'
 
@@ -17,6 +17,9 @@ function createHarness(options = {}) {
   const values = new Map(Object.entries(options.credentials ?? {}))
   let handler
   let fetchCalls = 0
+  let lastUrl
+  let lastInit
+  let credentialListener
 
   const ctx = {
     credentials: {
@@ -30,6 +33,10 @@ function createHarness(options = {}) {
         return () => {}
       },
     },
+    on(name, listener) {
+      if (name === 'credentials/reference-updated') credentialListener = listener
+      return () => {}
+    },
     effect(callback) {
       const cleanup = callback()
       return () => cleanup?.()
@@ -38,19 +45,21 @@ function createHarness(options = {}) {
 
   apply(ctx, {
     apiKeyEnv: options.apiKeyEnv ?? 'TEST_KEY',
-    usageUrl: 'https://usage.test/v1/usage',
+    usageUrl: options.usageUrl ?? 'https://usage.test/v1/usage',
     cacheMs: options.cacheMs ?? 5_000,
   })
   assert.equal(typeof handler, 'function')
 
   globalThis.fetch = async (url, init) => {
     fetchCalls += 1
+    lastUrl = String(url)
+    lastInit = init
     if (options.fetchError === true) throw new TypeError('network down')
     const status = options.status ?? 200
     const body = options.body ?? JSON.stringify(payload)
     return new Response(body, {
       status,
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...options.headers },
     })
   }
 
@@ -75,7 +84,13 @@ function createHarness(options = {}) {
     })
   }
 
-  return { call, fetchCalls: () => fetchCalls }
+  return {
+    call,
+    fetchCalls: () => fetchCalls,
+    lastUrl: () => lastUrl,
+    lastInit: () => lastInit,
+    emitCredential: (ref) => credentialListener?.(ref),
+  }
 }
 
 test('normalizes the three windows', async (t) => {
@@ -174,4 +189,85 @@ test('rejects non-GET requests', async (t) => {
   const result = await harness.call({ method: 'POST' })
   assert.equal(result.status, 405)
   assert.equal(harness.fetchCalls(), 0)
+})
+
+test('sends the resolved key only to the configured HTTPS endpoint', async (t) => {
+  const harness = createHarness({ credentials: { TEST_KEY: 'test-key' } })
+  t.after(() => { delete globalThis.fetch })
+
+  await harness.call()
+  assert.equal(harness.lastUrl(), 'https://usage.test/v1/usage')
+  assert.equal(harness.lastInit().headers.authorization, 'Bearer test-key')
+})
+
+test('refuses to send the key over plaintext to a non-loopback host', async (t) => {
+  const harness = createHarness({
+    credentials: { TEST_KEY: 'test-key' },
+    usageUrl: 'http://upstream.example.test/usage',
+  })
+  t.after(() => { delete globalThis.fetch })
+
+  await harness.call()
+  assert.equal(harness.lastUrl(), 'https://opencode.ai/zen/go/v1/usage')
+
+  const loopback = createHarness({
+    credentials: { TEST_KEY: 'test-key' },
+    usageUrl: 'http://127.0.0.1:9999/usage',
+  })
+  await loopback.call()
+  assert.equal(loopback.lastUrl(), 'http://127.0.0.1:9999/usage')
+})
+
+test('maps 429 backoff and serves it from the cache', async (t) => {
+  const harness = createHarness({
+    credentials: { TEST_KEY: 'test-key' },
+    status: 429,
+    headers: { 'retry-after': '120' },
+  })
+  t.after(() => { delete globalThis.fetch })
+
+  const first = await harness.call()
+  assert.equal(first.body.reason, 'rate-limited')
+  assert.equal(first.body.retryAfterMs, 120_000)
+
+  const second = await harness.call()
+  assert.equal(second.body.reason, 'rate-limited')
+  assert.equal(harness.fetchCalls(), 1)
+})
+
+test('maps 5xx responses to a server error', async (t) => {
+  const harness = createHarness({
+    credentials: { TEST_KEY: 'test-key' },
+    status: 503,
+    headers: { 'retry-after': '1' },
+  })
+  t.after(() => { delete globalThis.fetch })
+
+  const result = await harness.call()
+  assert.equal(result.body.reason, 'server-error')
+  assert.equal(result.body.httpStatus, 503)
+  assert.equal(result.body.retryAfterMs, 1_000)
+})
+
+test('clears the cache when the credential reference changes', async (t) => {
+  const harness = createHarness({ credentials: { TEST_KEY: 'test-key' } })
+  t.after(() => { delete globalThis.fetch })
+
+  await harness.call()
+  await harness.call()
+  assert.equal(harness.fetchCalls(), 1)
+
+  harness.emitCredential('TEST_KEY')
+  await harness.call()
+  assert.equal(harness.fetchCalls(), 2)
+
+  await harness.call()
+  assert.equal(harness.fetchCalls(), 2)
+})
+
+test('Config exposes safe defaults', () => {
+  const config = Config({})
+  assert.equal(config.apiKeyEnv, 'OPENCODE_GO_API_KEY')
+  assert.equal(config.usageUrl, 'https://opencode.ai/zen/go/v1/usage')
+  assert.equal(config.cacheMs, 30_000)
 })

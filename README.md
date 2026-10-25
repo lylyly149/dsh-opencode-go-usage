@@ -1,10 +1,14 @@
 # OpenCode Go Usage
 
+[![npm version](https://img.shields.io/npm/v/@lylyly149/dsh-opencode-go-usage.svg)](https://www.npmjs.com/package/@lylyly149/dsh-opencode-go-usage)
+[![license](https://img.shields.io/npm/l/@lylyly149/dsh-opencode-go-usage.svg)](LICENSE)
+[![CI](https://github.com/lylyly149/dsh-opencode-go-usage/actions/workflows/ci.yml/badge.svg)](https://github.com/lylyly149/dsh-opencode-go-usage/actions/workflows/ci.yml)
+
 OpenCode Go plan quota for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness):
 a compact **270° fan** beside the composer and a dedicated **Settings → OpenCode Go**
 page for the rolling 5-hour, weekly, and monthly windows.
 
-![270° fan indicator preview](docs/fan.png)
+![270° fan indicator preview](https://raw.githubusercontent.com/lylyly149/dsh-opencode-go-usage/main/docs/fan.png)
 
 The preview uses illustrative values (75%, 35%, 10%) to show arc lengths and
 colors; live values come from the official usage endpoint.
@@ -22,10 +26,21 @@ colors; live values come from the official usage endpoint.
   `84% (month)`.
 - **Settings page** — full progress bars, used/remaining percentages, reset
   times, and a refresh button. Available regardless of the selected model.
+- **Unavailable state** — when the key is missing, rejected, or the
+  subscription is inactive, the composer shows a small warning marker with the
+  reason instead of silently disappearing.
+- **Locale-aware dates** — reset times and the relative countdown follow the
+  DSH UI locale, not the browser/OS locale. Chinese stays Chinese and English
+  stays English.
 - **English and Chinese** — UI copy and Plugin Manager metadata in both
   languages.
 - **Live updates** — the browser polls every 60 seconds; the Host caches the
-  upstream response for 30 seconds. Arc lengths and colors transition smoothly.
+  upstream response for 30 seconds. Polling pauses while the tab is hidden and
+  refreshes immediately when it becomes visible. Arc lengths and colors
+  transition smoothly.
+- **Resilient Host** — honours `Retry-After` for 429/5xx responses, invalidates
+  the cache when the credential reference changes, and rejects plaintext
+  upstream URLs for non-loopback hosts.
 
 ## Requirements
 
@@ -88,12 +103,14 @@ composer indicator appears when the current Session's provider is
 
 ## Configuration
 
-The bundle row accepts optional fields in the profile's `cordis.patch.yml`:
+The Host exports a Loader `Config` schema, so these fields are validated at
+activation and are available to the Plugin Manager/Loader configuration surface. They
+can also be set in the profile's `cordis.patch.yml`:
 
 | Field | Default | Meaning |
 |---|---|---|
 | `apiKeyEnv` | `OPENCODE_GO_API_KEY` | Credential reference resolved through `ctx.credentials`; `OPENCODE_API_KEY` is tried as a fallback |
-| `usageUrl` | `https://opencode.ai/zen/go/v1/usage` | Upstream quota endpoint |
+| `usageUrl` | `https://opencode.ai/zen/go/v1/usage` | Upstream quota endpoint; must be HTTPS unless it is a loopback host |
 | `cacheMs` | `30000` | Host-side upstream cache lifetime (5s–300s) |
 
 Example:
@@ -139,15 +156,22 @@ The upstream payload is:
 - The plugin has no telemetry, analytics, or third-party requests beyond the
   official quota endpoint. It stores no account data; the Host cache is
   in-memory only.
+- Upstream URLs must be HTTPS unless they are loopback hosts, so the bearer key
+  is never sent in plaintext to a remote endpoint.
 - This repository contains no API keys, DSH profiles, session logs, or user
   paths. The preview image uses synthetic values.
+- npm releases carry provenance from the GitHub release workflow; configure npm
+  Trusted Publishing for this repository to avoid long-lived npm tokens. See
+  [SECURITY.md](SECURITY.md).
 
 ## Failure behavior
 
 - Missing/invalid key or no Go subscription: the Settings page explains the
-  condition; the composer indicator stays hidden.
+  condition, and the composer shows a small warning marker with the reason.
 - Transient network or upstream failure: the last successful quota stays on
   screen until a later poll succeeds.
+- 429/5xx: the Host honours `Retry-After` (up to one hour), serves the backoff
+  window from its cache, and reports `rate-limited` or `server-error`.
 - The Settings page's **Refresh** action bypasses the Host cache.
 
 ## Compatibility and relationship to other plugins
@@ -161,12 +185,18 @@ show two independent quota surfaces; installing one is usually enough.
 
 ## Development
 
-No runtime dependencies and no build step.
+One small runtime dependency (`@deepseek-ai/schemastery` for the Loader
+`Config`), development-only browser test dependencies, and no build step.
 
 ```bash
-npm test          # node --test; host route, client registration, manifest/privacy checks
+npm install
+npm test          # 22 tests: Host route, real client components in jsdom, manifest/privacy
 npm pack --dry-run
 ```
+
+The test suite includes jsdom/react-dom component tests for the 270° fan
+geometry, colors, the Settings page, and the unavailable state. CI runs the
+suite on Node 20 and 22 and checks the published file list.
 
 The browser half is a hand-authored factory bundle because out-of-tree client
 plugins have no public build pipeline yet. It may only `require()` modules from

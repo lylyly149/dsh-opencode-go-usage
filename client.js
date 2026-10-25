@@ -39,10 +39,12 @@ window.__ModuleLoader__.load({
       percentRemaining: '{percent}% remaining',
       usedPercent: '{percent}% used',
       resetsAt: 'Resets {time}',
+      resetCountdown: '({time})',
       resetUnavailable: 'Reset time unavailable',
       rateLimited: 'Rate limited',
       loading: 'Loading usage…',
       unavailable: 'Plan usage is unavailable right now.',
+      warning: 'OpenCode Go usage unavailable',
       reasonMissingKey: 'No OpenCode Go API key is configured for this profile.',
       reasonInvalidKey: 'The OpenCode Go API key was rejected. Check the key under Settings → Models.',
       reasonNoSubscription: 'This workspace has no active OpenCode Go subscription.',
@@ -50,6 +52,10 @@ window.__ModuleLoader__.load({
       reasonBadResponse: 'The usage endpoint returned an unexpected response.',
       reasonCredential: 'The stored OpenCode Go credential could not be read.',
       reasonForbidden: 'This page is not allowed to read usage from this host.',
+      reasonRateLimited: 'The usage endpoint is rate-limiting requests. Try again later.',
+      reasonServer: 'The usage endpoint is temporarily unavailable.',
+      reasonHttp: 'The usage endpoint returned an error.',
+      reasonInternal: 'The usage request failed inside the plugin.',
       reasonUnknown: 'The usage request failed.',
       refresh: 'Refresh',
       updatedAt: 'Updated {time}',
@@ -72,10 +78,12 @@ window.__ModuleLoader__.load({
       percentRemaining: '剩余 {percent}%',
       usedPercent: '已用 {percent}%',
       resetsAt: '{time} 重置',
+      resetCountdown: '（{time}）',
       resetUnavailable: '无法获取重置时间',
       rateLimited: '已触发限流',
       loading: '正在读取用量…',
       unavailable: '暂时无法读取套餐用量。',
+      warning: 'OpenCode Go 用量不可用',
       reasonMissingKey: '当前配置没有 OpenCode Go API 密钥。',
       reasonInvalidKey: 'OpenCode Go API 密钥被拒绝，请在“设置 → 模型”中检查。',
       reasonNoSubscription: '当前工作区没有有效的 OpenCode Go 订阅。',
@@ -83,6 +91,10 @@ window.__ModuleLoader__.load({
       reasonBadResponse: '用量接口返回了无法识别的响应。',
       reasonCredential: '无法读取已保存的 OpenCode Go 凭据。',
       reasonForbidden: '当前页面无权从此主机读取用量。',
+      reasonRateLimited: '用量接口正在限流，请稍后再试。',
+      reasonServer: '用量接口暂时不可用。',
+      reasonHttp: '用量接口返回错误。',
+      reasonInternal: '插件内部请求失败。',
       reasonUnknown: '用量请求失败。',
       refresh: '刷新',
       updatedAt: '更新于 {time}',
@@ -201,12 +213,27 @@ window.__ModuleLoader__.load({
       return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value)
     }
 
+    /**
+     * The DSH locale, not the browser/OS locale. The shell keeps
+     * `<html lang>` in sync with the active Harness language, so dates and
+     * relative times follow the UI instead of mixing English dates into a
+     * Chinese page.
+     */
+    function uiLocale() {
+      try {
+        const lang = globalThis.document?.documentElement?.lang
+        return typeof lang === 'string' && lang.length > 0 ? lang : undefined
+      } catch {
+        return undefined
+      }
+    }
+
     function formatReset(value) {
       if (typeof value !== 'string') return undefined
       const time = Date.parse(value)
       if (!Number.isFinite(time)) return undefined
       try {
-        return new Intl.DateTimeFormat(undefined, {
+        return new Intl.DateTimeFormat(uiLocale(), {
           month: 'short',
           day: 'numeric',
           hour: '2-digit',
@@ -222,7 +249,7 @@ window.__ModuleLoader__.load({
       const time = Date.parse(value)
       if (!Number.isFinite(time)) return undefined
       try {
-        return new Intl.DateTimeFormat(undefined, {
+        return new Intl.DateTimeFormat(uiLocale(), {
           hour: '2-digit',
           minute: '2-digit',
         }).format(new Date(time))
@@ -231,9 +258,29 @@ window.__ModuleLoader__.load({
       }
     }
 
+    function formatCountdown(value) {
+      if (typeof value !== 'string') return undefined
+      const time = Date.parse(value)
+      if (!Number.isFinite(time)) return undefined
+      try {
+        const formatter = new Intl.RelativeTimeFormat(uiLocale(), { numeric: 'auto' })
+        const minutes = Math.max(0, Math.round((time - Date.now()) / 60_000))
+        if (minutes < 60) return formatter.format(minutes, 'minute')
+        const hours = Math.floor(minutes / 60)
+        if (hours < 24) return formatter.format(hours, 'hour')
+        return formatter.format(Math.floor(hours / 24), 'day')
+      } catch {
+        return undefined
+      }
+    }
+
     function resetLabel(window, t) {
       const time = formatReset(window.resetsAt)
-      return time === undefined ? t('resetUnavailable') : t('resetsAt', { time })
+      if (time === undefined) return t('resetUnavailable')
+      const countdown = formatCountdown(window.resetsAt)
+      return countdown === undefined
+        ? t('resetsAt', { time })
+        : `${t('resetsAt', { time })} ${t('resetCountdown', { time: countdown })}`
     }
 
     function unavailableReason(reason, t) {
@@ -246,6 +293,10 @@ window.__ModuleLoader__.load({
         case 'bad-response': return t('reasonBadResponse')
         case 'credential-error': return t('reasonCredential')
         case 'forbidden': return t('reasonForbidden')
+        case 'rate-limited': return t('reasonRateLimited')
+        case 'server-error': return t('reasonServer')
+        case 'http-error': return t('reasonHttp')
+        case 'internal-error': return t('reasonInternal')
         default: return t('reasonUnknown')
       }
     }
@@ -273,9 +324,12 @@ window.__ModuleLoader__.load({
 
         let disposed = false
         let timer
+        let inFlight = false
         const controller = new AbortController()
 
         const load = async () => {
+          if (disposed || inFlight) return
+          inFlight = true
           try {
             const response = await fetch(USAGE_PATH, {
               method: 'GET',
@@ -298,15 +352,43 @@ window.__ModuleLoader__.load({
             if (!disposed && !controller.signal.aborted) {
               setState((previous) => previous.status === 'ready' ? previous : { status: 'unavailable', reason: 'network' })
             }
+          } finally {
+            inFlight = false
           }
+        }
+
+        const stopTimer = () => {
+          if (timer !== undefined) {
+            window.clearInterval(timer)
+            timer = undefined
+          }
+        }
+        const startTimer = () => {
+          stopTimer()
+          timer = window.setInterval(() => { void load() }, POLL_INTERVAL_MS)
+        }
+        const onVisibilityChange = () => {
+          if (typeof globalThis.document === 'undefined') return
+          if (globalThis.document.visibilityState === 'hidden') {
+            stopTimer()
+            return
+          }
+          void load()
+          startTimer()
         }
 
         setState({ status: 'loading' })
         void load()
-        timer = window.setInterval(() => { void load() }, POLL_INTERVAL_MS)
+        startTimer()
+        if (typeof globalThis.document?.addEventListener === 'function') {
+          globalThis.document.addEventListener('visibilitychange', onVisibilityChange)
+        }
         return () => {
           disposed = true
-          window.clearInterval(timer)
+          stopTimer()
+          if (typeof globalThis.document?.removeEventListener === 'function') {
+            globalThis.document.removeEventListener('visibilitychange', onVisibilityChange)
+          }
           controller.abort()
         }
       }, [enabled, reloadToken])
@@ -314,10 +396,88 @@ window.__ModuleLoader__.load({
       return state
     }
 
+    /** Keep one broken slot entry from taking down the composer or Settings page. */
+    class SlotErrorBoundary extends React.Component {
+      constructor(props) {
+        super(props)
+        this.state = { failed: false }
+      }
+
+      static getDerivedStateFromError() {
+        return { failed: true }
+      }
+
+      render() {
+        return this.state.failed ? (this.props.fallback ?? null) : this.props.children
+      }
+    }
+
+    /** Explain why the composer indicator is absent instead of silently hiding. */
+    function QuotaWarning({ t, reason }) {
+      const [hovered, setHovered] = React.useState(false)
+      const [focused, setFocused] = React.useState(false)
+      const tooltipId = React.useId()
+      const text = unavailableReason(reason, t)
+      const label = `${t('warning')}: ${text}`
+      const visible = hovered || focused
+
+      return h('span', {
+        role: 'status',
+        tabIndex: 0,
+        'data-opencode-go-usage': 'unavailable',
+        'aria-label': label,
+        'aria-describedby': visible ? tooltipId : undefined,
+        onMouseEnter: () => { setHovered(true) },
+        onMouseLeave: () => { setHovered(false) },
+        onFocus: () => { setFocused(true) },
+        onBlur: () => { setFocused(false) },
+        style: {
+          position: 'relative',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 22,
+          height: 28,
+          outline: 'none',
+          cursor: 'help',
+          color: 'var(--dsw-alias-state-warn-primary, #eab308)',
+        },
+      }, [
+        h('span', {
+          key: 'mark',
+          'aria-hidden': true,
+          style: {
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 16,
+            height: 16,
+            borderRadius: 999,
+            border: '1px solid currentColor',
+            fontSize: 11,
+            fontWeight: 700,
+            lineHeight: 1,
+          },
+        }, '!'),
+        visible ? h('span', {
+          key: 'tooltip',
+          id: tooltipId,
+          role: 'tooltip',
+          style: { ...tooltipStyle, minWidth: 200, maxWidth: 280, whiteSpace: 'normal' },
+        }, [
+          h('span', {
+            key: 'title',
+            style: { display: 'block', fontWeight: 600, marginBottom: 4 },
+          }, t('warning')),
+          h('span', { key: 'reason', style: { display: 'block' } }, text),
+        ]) : null,
+      ])
+    }
+
     /** Slot wrapper keeps hooks out of the early return for a missing directory. */
     function OpenCodeGoIndicator({ directory, t }) {
       if (directory === undefined || directory === null) return null
-      return h(OpenCodeGoIndicatorBody, { directory, t })
+      return h(SlotErrorBoundary, null, h(OpenCodeGoIndicatorBody, { directory, t }))
     }
 
     function OpenCodeGoIndicatorBody({ directory, t }) {
@@ -330,7 +490,11 @@ window.__ModuleLoader__.load({
       const [focused, setFocused] = React.useState(false)
       const tooltipId = React.useId()
 
-      if (!eligible || usageState.status !== 'ready') return null
+      if (!eligible) return null
+      if (usageState.status === 'unavailable') {
+        return h(QuotaWarning, { t, reason: usageState.reason })
+      }
+      if (usageState.status !== 'ready') return null
       const windows = usageState.usage.windows
       if (windows.length === 0) return null
 
@@ -531,6 +695,13 @@ window.__ModuleLoader__.load({
 
     function OpenCodeGoSettings({ t }) {
       const translate = typeof t === 'function' ? t : (key) => key
+      return h(SlotErrorBoundary, {
+        fallback: h('p', { style: errorStyle }, translate('unavailable')),
+      }, h(OpenCodeGoSettingsBody, { t }))
+    }
+
+    function OpenCodeGoSettingsBody({ t }) {
+      const translate = typeof t === 'function' ? t : (key) => key
       const [reloadToken, setReloadToken] = React.useState(0)
       const usageState = useUsage(true, reloadToken)
       const fetchedAt = usageState.status === 'ready' ? formatUpdatedAt(usageState.usage.fetchedAt) : undefined
@@ -541,10 +712,11 @@ window.__ModuleLoader__.load({
       }, [
         h('div', { key: 'heading' }, [
           h('h2', {
+            key: 'title',
             id: 'opencode-go-usage-title',
             style: titleStyle,
           }, translate('title')),
-          h('p', { style: { ...bodyStyle, marginTop: 6 } }, translate('intro')),
+          h('p', { key: 'intro', style: { ...bodyStyle, marginTop: 6 } }, translate('intro')),
         ]),
         h('div', { key: 'card', style: cardStyle }, [
           usageState.status === 'ready'

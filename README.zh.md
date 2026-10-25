@@ -1,10 +1,14 @@
 # OpenCode Go Usage
 
+[![npm 版本](https://img.shields.io/npm/v/@lylyly149/dsh-opencode-go-usage.svg)](https://www.npmjs.com/package/@lylyly149/dsh-opencode-go-usage)
+[![许可证](https://img.shields.io/npm/l/@lylyly149/dsh-opencode-go-usage.svg)](LICENSE)
+[![CI](https://github.com/lylyly149/dsh-opencode-go-usage/actions/workflows/ci.yml/badge.svg)](https://github.com/lylyly149/dsh-opencode-go-usage/actions/workflows/ci.yml)
+
 在 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 中查看
 [OpenCode Go](https://opencode.ai/docs/go/) 套餐用量：输入框旁一个紧凑的
 **270° 扇形**，以及 **设置 → OpenCode Go** 详情页，覆盖滚动 5 小时、每周和每月三个窗口。
 
-![270° 扇形指示器预览](docs/fan.png)
+![270° 扇形指示器预览](https://raw.githubusercontent.com/lylyly149/dsh-opencode-go-usage/main/docs/fan.png)
 
 预览使用 75% / 35% / 10% 的示意数据，只用于展示弧长和颜色；实际数值来自官方接口。
 
@@ -14,8 +18,11 @@
 - **按额度变色**：每个环和右侧数字在剩余 ≥50% 时为绿色，20–49% 为黄色，低于 20% 为红色。
 - **最紧张窗口**：右侧数字取剩余最少的窗口并带短标签，例如 `84%（月）`。
 - **设置页**：完整进度条、已用/剩余百分比、重置时间和刷新按钮；不依赖当前模型。
+- **不可用提示**：Key 缺失、被拒绝或订阅失效时，输入框旁显示带原因的小警告标记，而不是直接消失。
+- **日期跟随语言**：重置时间和相对倒计时跟随 DSH 界面语言，不再出现中文界面混英文日期。
 - **中英文**：界面文案和插件管理元数据均提供中英文。
-- **动态更新**：浏览器每 60 秒轮询，Host 缓存 30 秒；弧长和颜色带过渡动画。
+- **动态更新**：浏览器每 60 秒轮询，Host 缓存 30 秒；页面隐藏时暂停轮询，恢复时立即刷新；弧长和颜色带过渡动画。
+- **Host 容错**：429/5xx 遵循 `Retry-After`；凭据引用变化时清缓存；非 loopback 的明文 HTTP 上游会被拒绝。
 
 ## 环境要求
 
@@ -73,12 +80,12 @@ refs:
 
 ## 配置
 
-在 profile 的 `cordis.patch.yml` 中覆盖插件行：
+Host 导出了 Loader `Config` schema，配置会在激活时校验，并可用于 Loader/Plugin Manager 的配置界面；也可以直接改 profile 的 `cordis.patch.yml`：
 
 | 字段 | 默认值 | 含义 |
 |---|---|---|
 | `apiKeyEnv` | `OPENCODE_GO_API_KEY` | 通过 `ctx.credentials` 解析的凭据引用；会回退尝试 `OPENCODE_API_KEY` |
-| `usageUrl` | `https://opencode.ai/zen/go/v1/usage` | 上游额度接口 |
+| `usageUrl` | `https://opencode.ai/zen/go/v1/usage` | 上游额度接口；非 loopback 必须是 HTTPS |
 | `cacheMs` | `30000` | Host 侧上游缓存时间（5–300 秒） |
 
 ```yaml
@@ -104,7 +111,16 @@ refs:
 - 浏览器只访问同源路由；路由拒绝跨站请求，并返回 `cache-control: no-store`。
 - 错误响应只包含固定原因码，不包含凭据或上游响应内容。
 - 插件没有遥测、分析或第三方请求，只访问官方额度接口；Host 缓存仅在内存中。
+- 非 loopback 的上游必须是 HTTPS，避免 Bearer Key 明文传输。
 - 本仓库不包含 API Key、DSH profile、会话日志或用户路径；预览图使用示意数据。
+- npm 发布带 GitHub Release 工作流的 provenance；建议在 npm 配置 Trusted Publishing，避免长期 token。见 [SECURITY.md](SECURITY.md)。
+
+## 失败行为
+
+- Key 缺失/无效或无订阅：设置页说明原因，输入框旁显示警告标记和原因。
+- 临时网络/上游失败：保留上次成功的数据，直到后续轮询成功。
+- 429/5xx：Host 遵循 `Retry-After`（最长 1 小时），在退避窗口内直接返回缓存结果，并报告 `rate-limited` 或 `server-error`。
+- 设置页的“刷新”会绕过 Host 缓存。
 
 ## 与其他插件的关系
 
@@ -114,12 +130,15 @@ npm 上另有一个独立的 `dsh-opencode-go-usage`（作者 `yumusb`），它�
 
 ## 开发
 
-无运行时依赖、无构建步骤。
+一个很小的运行时依赖（`@deepseek-ai/schemastery`，用于 Loader `Config`）、仅开发用的浏览器测试依赖，无构建步骤。
 
 ```bash
-npm test          # node --test：Host 路由、客户端注册、清单与隐私检查
+npm install
+npm test          # 22 项：Host 路由、jsdom 真实组件、清单与隐私检查
 npm pack --dry-run
 ```
+
+测试包含 jsdom/react-dom 组件测试，覆盖 270° 扇形几何、颜色、设置页和不可用状态。CI 在 Node 20/22 上运行，并检查发布文件列表。
 
 浏览器半区是手写 factory bundle（`window.__ModuleLoader__.load`），因为目前第三方客户端
 插件没有公开构建流水线；只能 `require()` 壳层模块表里的模块（`react` 和已注册的客户端包）。
